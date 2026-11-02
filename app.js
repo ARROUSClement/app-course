@@ -1,11 +1,15 @@
 const STORAGE_KEY = 'courses-session';
 const CATALOG_KEY = 'courses-catalogue';
+const HISTORY_KEY = 'courses-historique';
+const HISTORY_LIMIT = 100;
 const WARN_RATIO = 0.75;
 const DIGITS_ONLY = '0123456789,.€/kgKGlL';
 const $ = (id) => document.getElementById(id);
 
 let session = readStorage(STORAGE_KEY, null);
 let catalog = readStorage(CATALOG_KEY, {});
+let history = readStorage(HISTORY_KEY, []);
+let openPast = null;
 let selectedForBasket = new Set();
 let worker = null;
 let sheetState = { category: 'autre', categoryChosen: false, plannedKey: null };
@@ -56,6 +60,7 @@ function writeStorage(key, value) {
 
 const saveSession = () => writeStorage(STORAGE_KEY, session);
 const saveCatalog = () => writeStorage(CATALOG_KEY, catalog);
+const saveHistory = () => writeStorage(HISTORY_KEY, history);
 
 // --- Petits constructeurs d'interface ---
 
@@ -106,6 +111,89 @@ function renderSetup() {
     return row;
   }));
   renderEstimate();
+  renderHistory();
+}
+
+// --- Anciennes courses ---
+
+const itemsTotal = (items) => items.reduce((sum, item) => sum + item.cents * item.quantity, 0);
+
+function formatDate(iso) {
+  return new Date(iso).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+function renderHistory() {
+  $('history-section').hidden = history.length === 0;
+  $('history').replaceChildren(...history.map((past) => {
+    const row = el('li', 'catalog-row');
+    const button = el('button', 'catalog-toggle');
+    button.type = 'button';
+    const label = el('span', 'label', formatDate(past.date));
+    const count = past.items.length;
+    label.append(el('small', '', `${count} article${count > 1 ? 's' : ''} · budget ${formatAmount(past.budget)}`));
+    button.append(label, el('span', '', formatAmount(itemsTotal(past.items))));
+    button.addEventListener('click', () => showPast(past));
+    row.append(button);
+    return row;
+  }));
+}
+
+function showPast(past) {
+  renderPast(past);
+  $('past').showModal();
+}
+
+function renderPast(past) {
+  openPast = past;
+  const total = itemsTotal(past.items);
+  $('past-title').textContent = formatDate(past.date);
+  $('past-summary').textContent = `Dépensé : ${formatAmount(total)} sur ${formatAmount(past.budget)}`;
+  $('past-items').replaceChildren(...past.items.map((item) => {
+    const row = el('li');
+    const amount = item.quantity > 1 ? `${item.quantity} × ${formatAmount(item.cents)}` : formatAmount(item.cents);
+    row.append(
+      el('span', 'group-icon', categoryOf(item.category).icon),
+      editButton(`${item.name || 'Sans nom'} — ${amount}`, item, past),
+    );
+    return row;
+  }));
+
+  const unnamed = past.items.filter((item) => !item.name).length;
+  const resumable = past.items.length - unnamed;
+  $('past-note').hidden = unnamed === 0;
+  $('past-note').textContent = unnamed > 1 ? `${unnamed} articles sans nom ne seront pas repris.` : '1 article sans nom ne sera pas repris.';
+  $('past-resume').disabled = resumable === 0;
+}
+
+// Le dernier prix connu passe avant le prix de ces anciennes courses.
+function plannedFromPast(past) {
+  const planned = new Map();
+  for (const item of past.items) {
+    if (!item.name) continue;
+    const known = findInCatalog(catalog, item.name);
+    const key = known ? known.key : normalizeName(item.name);
+    const existing = planned.get(key);
+    if (existing) {
+      existing.quantity += item.quantity;
+    } else {
+      const source = known ? known.entry : item;
+      planned.set(key, {
+        key,
+        name: source.name,
+        cents: source.cents,
+        category: source.category,
+        quantity: item.quantity,
+      });
+    }
+  }
+  return [...planned.values()];
+}
+
+function archiveSession() {
+  if (!session.items.length) return;
+  history.unshift({ date: new Date().toISOString(), budget: session.budget, items: session.items });
+  history = history.slice(0, HISTORY_LIMIT);
+  saveHistory();
 }
 
 function renderEstimate() {
@@ -133,7 +221,7 @@ function render() {
   const spent = session.items.reduce((sum, item) => sum + item.cents * item.quantity, 0);
   const left = session.budget - spent;
   const ratio = session.budget > 0 ? spent / session.budget : 1;
-  const plannedTotal = session.planned.reduce((sum, item) => sum + item.cents, 0);
+  const plannedTotal = session.planned.reduce((sum, item) => sum + item.cents * (item.quantity || 1), 0);
 
   $('status').dataset.level = left < 0 ? 'over' : ratio >= WARN_RATIO ? 'warn' : 'ok';
   $('remaining-label').textContent = left < 0 ? 'Budget dépassé de' : 'Il te reste';
@@ -151,13 +239,27 @@ function render() {
   $('items').replaceChildren(...groups.map(renderGroup));
 }
 
+function editButton(text, item, past = null) {
+  const button = el('button', 'item-edit', text);
+  button.type = 'button';
+  button.setAttribute('aria-label', `Modifier : ${text}`);
+  button.addEventListener('click', () => openSheet({
+    title: "Modifier l'article",
+    name: item.name || '',
+    price: item.cents,
+    category: item.category,
+    edit: { item, past },
+  }));
+  return button;
+}
+
 function renderPlanned(item) {
   const row = el('li', 'catalog-row');
   const button = el('button', 'catalog-toggle');
   button.type = 'button';
   button.append(
     el('span', 'group-icon', categoryOf(item.category).icon),
-    el('span', 'label', item.name),
+    el('span', 'label', item.quantity > 1 ? `${item.quantity} × ${item.name}` : item.name),
     el('span', '', `~${formatAmount(item.cents)}`),
   );
   button.addEventListener('click', () => openSheet({
@@ -192,7 +294,7 @@ function renderGroup({ category, items }) {
       ? `${item.quantity} × ${formatAmount(item.cents)}`
       : formatAmount(item.cents);
     row.append(
-      el('span', 'label', item.name ? `${item.name} — ${amount}` : amount),
+      editButton(item.name ? `${item.name} — ${amount}` : `Sans nom — ${amount}`, item),
       removeButton(`Supprimer ${item.name || amount}`, () => {
         session.items = session.items.filter((other) => other.id !== item.id);
         saveSession();
@@ -391,11 +493,13 @@ async function runScan(read) {
 
 // --- Fenêtre de validation ---
 
-function openSheet({ title, name = '', prices = [], manual = false, plannedKey = null }) {
-  sheetState = { category: 'autre', categoryChosen: false, plannedKey };
+function openSheet({ title, name = '', prices = [], manual = false, plannedKey = null, price = null, category = null, edit = null }) {
+  // Une catégorie déjà choisie est gardée ; « Autre » peut encore être remplacée d'après le nom.
+  sheetState = { category: category || 'autre', categoryChosen: Boolean(category && category !== 'autre'), plannedKey, edit };
+  $('add-label').textContent = edit ? 'Enregistrer avec la quantité :' : 'Ajouter :';
   $('sheet-title').textContent = title;
   $('quick').hidden = !manual;
-  $('price-input').value = '';
+  $('price-input').value = price ? (price / 100).toFixed(2).replace('.', ',') : '';
   $('apple-hint').hidden = true;
   $('price-error').hidden = true;
   $('name-input').value = name;
@@ -481,13 +585,26 @@ function addItem(quantity) {
   }
   const name = $('name-input').value.trim();
   const category = sheetState.category;
-  session.items.push({ id: Date.now() + Math.random(), cents, quantity, category, name });
+  const { edit } = sheetState;
+  if (edit) Object.assign(edit.item, { cents, quantity, category, name });
+  else session.items.push({ id: Date.now() + Math.random(), cents, quantity, category, name });
 
   if (name) {
     const known = findInCatalog(catalog, name);
     const key = known ? known.key : normalizeName(name);
-    if (key) catalog[key] = { name, cents, category, date: new Date().toISOString() };
+    // Corriger une ancienne course ne doit pas écraser un prix plus récent.
+    if (key && !(edit && edit.past && known)) {
+      const date = edit && edit.past ? edit.past.date : new Date().toISOString();
+      catalog[key] = { name, cents, category, date };
+    }
     saveCatalog();
+  }
+  if (edit && edit.past) {
+    saveHistory();
+    renderPast(edit.past);
+    renderSetup();
+    $('sheet').close();
+    return;
   }
   if (sheetState.plannedKey) {
     session.planned = session.planned.filter((item) => item.key !== sheetState.plannedKey);
@@ -535,6 +652,24 @@ $('photo').addEventListener('change', async (event) => {
   });
 });
 
+$('past-close').addEventListener('click', () => $('past').close());
+$('past-delete').addEventListener('click', () => {
+  if (!confirm('Supprimer ces courses de ton historique ?')) return;
+  history = history.filter((past) => past !== openPast);
+  saveHistory();
+  $('past').close();
+  renderHistory();
+});
+$('past-resume').addEventListener('click', () => {
+  const typed = parseAmount($('budget-input').value);
+  session = { budget: typed || openPast.budget, items: [], planned: plannedFromPast(openPast) };
+  selectedForBasket = new Set();
+  saveSession();
+  $('past').close();
+  render();
+  startCamera();
+});
+
 $('manual').addEventListener('click', () => openSheet({ title: 'Quel montant ?', manual: true }));
 $('name-input').addEventListener('input', updateFromName);
 $('price-input').addEventListener('input', updateLastPrice);
@@ -575,7 +710,8 @@ $('quick').addEventListener('click', (event) => {
 });
 
 $('finish').addEventListener('click', () => {
-  if (!confirm('Terminer ces courses ? Les derniers prix restent enregistrés.')) return;
+  if (!confirm('Terminer ces courses ? Elles seront enregistrées dans ton historique.')) return;
+  archiveSession();
   session = null;
   saveSession();
   stopCamera();

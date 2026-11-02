@@ -32,6 +32,11 @@
 
       <button class="primary" type="submit">Commencer</button>
     </form>
+
+    <div id="history-section" hidden>
+      <h2>Mes anciennes courses</h2>
+      <ul id="history"></ul>
+    </div>
   </section>
 
   <section id="shop" class="screen" hidden>
@@ -98,6 +103,18 @@
       </div>
       <button id="cancel" type="button">Annuler</button>
     </form>
+  </dialog>
+
+  <dialog id="past">
+    <div id="past-content">
+      <h2 id="past-title"></h2>
+      <p id="past-summary" class="hint"></p>
+      <ul id="past-items"></ul>
+      <p id="past-note" class="hint" hidden></p>
+      <button id="past-resume" class="primary" type="button">Reprendre cette liste</button>
+      <button id="past-delete" type="button">Supprimer de l'historique</button>
+      <button id="past-close" type="button">Fermer</button>
+    </div>
   </dialog>
 
   <script src="vendor/tesseract.min.js"></script>
