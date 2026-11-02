@@ -83,6 +83,9 @@
         <input id="price-input" type="text" inputmode="decimal" autocomplete="off" placeholder="0,00" aria-label="Prix">
         <span>€</span>
       </div>
+      <button id="apple-scan" type="button">Lecture douteuse ? Scan Apple</button>
+      <p id="apple-hint" class="hint" hidden>Touche le champ de prix ci-dessus, puis « Scanner le texte » (l'icône de texte dans un cadre) et vise le prix. Vérifie-le ensuite avant d'ajouter.</p>
+      <p id="price-error" class="hint" role="alert" hidden>Montant non compris : garde seulement le prix à payer, par exemple 2,49.</p>
       <p id="last-price" class="hint" hidden></p>
       <p id="category-label" class="hint"></p>
       <div id="categories" role="group" aria-label="Catégorie"></div>

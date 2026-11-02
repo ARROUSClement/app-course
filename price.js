@@ -120,7 +120,7 @@
   // Présélectionner un prix douteux fausserait le total sans que l'on s'en aperçoive.
   function isConfident(prices) {
     const [top, ...others] = prices;
-    if (!top || top.unit || top.unsure) return false;
+    if (!top || top.unit || top.unsure || top.reads < 2) return false;
     return !others.some((other) => !other.unit && !other.unsure && other.score >= top.score / 2);
   }
 

@@ -13,9 +13,18 @@ let sheetState = { category: 'autre', categoryChosen: false, plannedKey: null };
 // --- Montants (toujours en centimes pour éviter les erreurs d'arrondi) ---
 
 function parseAmount(text) {
-  const match = String(text).trim().replace('€', '').trim().match(/^(\d{1,5})(?:[.,](\d{1,2}))?$/);
+  const match = String(text).trim().replace(/\s*€$/, '').match(/^(\d{1,5})(?:[.,](\d{1,2}))?$/);
   if (!match) return null;
   return parseInt(match[1], 10) * 100 + parseInt((match[2] || '0').padEnd(2, '0'), 10);
+}
+
+// Texte du scan Apple : accepte « 2€49 », « 2 49 », « Prix : 2,49 € » et un seul montant.
+// « 4,98 €/kg » ou deux prix sont refusés plutôt que devinés.
+function parseScannedAmount(text) {
+  const exact = parseAmount(text);
+  if (exact !== null) return exact;
+  const match = String(text).trim().match(/^[^\d]*(\d{1,3})\s*[,.€ ]\s*(\d{2})\s*(?:€|EUR)?$/i);
+  return match ? parseInt(match[1], 10) * 100 + parseInt(match[2], 10) : null;
 }
 
 function formatAmount(cents) {
@@ -290,7 +299,7 @@ async function readLabel(source, width, height, crop) {
   for (const invert of [false, true]) {
     const canvas = binarize(prepareImage(source, width, height, crop, false), invert);
     readings.push(parsePrices(await recognizeWords(canvas, DIGITS_ONLY)));
-    if (isConfident(mergeReadings(readings)) && mergeReadings(readings)[0].reads > 1) break;
+    if (isConfident(mergeReadings(readings))) break;
   }
   if (!mergeReadings(readings).length) {
     const inverted = prepareImage(source, width, height, crop, true);
@@ -387,6 +396,8 @@ function openSheet({ title, name = '', prices = [], manual = false, plannedKey =
   $('sheet-title').textContent = title;
   $('quick').hidden = !manual;
   $('price-input').value = '';
+  $('apple-hint').hidden = true;
+  $('price-error').hidden = true;
   $('name-input').value = name;
 
   $('known-names').replaceChildren(...Object.values(catalog).map((entry) => {
@@ -436,7 +447,7 @@ function updateLastPrice() {
   if (!known) return;
   const date = new Date(known.entry.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' });
   let text = `Dernier prix : ${formatAmount(known.entry.cents)} (${date})`;
-  const current = parseAmount($('price-input').value);
+  const current = parseScannedAmount($('price-input').value);
   if (current && current !== known.entry.cents) {
     const diff = current - known.entry.cents;
     text += ` — ${diff > 0 ? '+' : '−'}${formatAmount(Math.abs(diff))}`;
@@ -462,7 +473,8 @@ function renderCategories() {
 }
 
 function addItem(quantity) {
-  const cents = parseAmount($('price-input').value);
+  const cents = parseScannedAmount($('price-input').value);
+  $('price-error').hidden = Boolean(cents);
   if (!cents) {
     $('price-input').focus();
     return;
@@ -526,7 +538,22 @@ $('photo').addEventListener('change', async (event) => {
 $('manual').addEventListener('click', () => openSheet({ title: 'Quel montant ?', manual: true }));
 $('name-input').addEventListener('input', updateFromName);
 $('price-input').addEventListener('input', updateLastPrice);
+$('apple-scan').addEventListener('click', () => {
+  for (const choice of $('choices').children) choice.setAttribute('aria-pressed', 'false');
+  $('price-input').value = '';
+  $('price-error').hidden = true;
+  $('apple-hint').hidden = false;
+  updateLastPrice();
+  $('price-input').focus();
+});
 $('cancel').addEventListener('click', () => $('sheet').close());
+// Le scan Apple peut interrompre la caméra de l'appli.
+$('sheet').addEventListener('close', () => {
+  const video = $('video');
+  if (!session) return;
+  if (video.srcObject && video.srcObject.active) video.play().catch(() => startCamera());
+  else startCamera();
+});
 $('quantity').addEventListener('click', (event) => {
   const qty = event.target.dataset.qty;
   if (qty) addItem(parseInt(qty, 10));
