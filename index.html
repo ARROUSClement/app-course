@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Budget Courses</title>
+  <meta name="theme-color" content="#14161a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Courses">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icon-180.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <section id="setup" class="screen">
+    <h1>Budget Courses</h1>
+    <form id="budget-form">
+      <label for="budget-input">Ton budget pour ces courses</label>
+      <div class="amount-field">
+        <input id="budget-input" type="text" inputmode="decimal" autocomplete="off" placeholder="80" required>
+        <span>€</span>
+      </div>
+
+      <div id="prepare" hidden>
+        <h2>Prépare ton panier</h2>
+        <p class="hint">Touche les articles à racheter, au dernier prix connu.</p>
+        <ul id="catalog"></ul>
+        <p id="estimate" aria-live="polite"></p>
+      </div>
+
+      <button class="primary" type="submit">Commencer</button>
+    </form>
+  </section>
+
+  <section id="shop" class="screen" hidden>
+    <header id="status" data-level="ok">
+      <p id="remaining-label">Il te reste</p>
+      <p id="remaining">0,00 €</p>
+      <p id="spent"></p>
+    </header>
+
+    <div id="camera">
+      <video id="video" playsinline muted autoplay></video>
+      <div id="frame"></div>
+      <p id="camera-message" hidden></p>
+    </div>
+
+    <div class="actions">
+      <button id="scan" class="primary" type="button" disabled>Chargement…</button>
+      <label id="photo-label" class="primary" hidden>
+        Prendre une photo
+        <input id="photo" type="file" accept="image/*" capture="environment">
+      </label>
+      <button id="manual" type="button">Saisir / au poids</button>
+    </div>
+
+    <div id="planned-section" hidden>
+      <h2>À acheter</h2>
+      <ul id="planned"></ul>
+    </div>
+
+    <h2 id="cart-title" hidden>Dans le caddie</h2>
+    <ul id="items"></ul>
+    <button id="finish" type="button">Terminer les courses</button>
+  </section>
+
+  <dialog id="sheet">
+    <form method="dialog" id="sheet-form">
+      <h2 id="sheet-title" tabindex="-1" autofocus>Quel prix ?</h2>
+      <input id="name-input" type="text" autocomplete="off" list="known-names" placeholder="Nom de l'article (facultatif)" aria-label="Nom de l'article">
+      <datalist id="known-names"></datalist>
+      <div id="choices"></div>
+      <div id="quick" hidden>
+        <button type="button" data-euros="1">1 €</button>
+        <button type="button" data-euros="2">2 €</button>
+        <button type="button" data-euros="3">3 €</button>
+        <button type="button" data-euros="5">5 €</button>
+      </div>
+      <div class="amount-field small">
+        <input id="price-input" type="text" inputmode="decimal" autocomplete="off" placeholder="0,00" aria-label="Prix">
+        <span>€</span>
+      </div>
+      <p id="last-price" class="hint" hidden></p>
+      <p id="category-label" class="hint"></p>
+      <div id="categories" role="group" aria-label="Catégorie"></div>
+      <p id="add-label" class="hint">Ajouter :</p>
+      <div id="quantity">
+        <button class="primary" type="button" data-qty="1">×1</button>
+        <button class="primary" type="button" data-qty="2">×2</button>
+        <button class="primary" type="button" data-qty="3">×3</button>
+        <button class="primary" type="button" id="qty-other" aria-label="Autre quantité">×…</button>
+      </div>
+      <button id="cancel" type="button">Annuler</button>
+    </form>
+  </dialog>
+
+  <script src="vendor/tesseract.min.js"></script>
+  <script src="price.js"></script>
+  <script src="catalog.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
