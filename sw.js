@@ -1,6 +1,6 @@
 // Met toute l'appli en cache pour qu'elle fonctionne sans réseau en magasin.
 // Changer CACHE à chaque mise à jour des fichiers.
-const CACHE = 'courses-v3';
+const CACHE = 'courses-v4';
 const FILES = [
   './',
   'index.html',
