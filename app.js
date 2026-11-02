@@ -1,6 +1,7 @@
 const STORAGE_KEY = 'courses-session';
 const CATALOG_KEY = 'courses-catalogue';
 const WARN_RATIO = 0.75;
+const DIGITS_ONLY = '0123456789,.€/kgKGlL';
 const $ = (id) => document.getElementById(id);
 
 let session = readStorage(STORAGE_KEY, null);
@@ -273,18 +274,69 @@ function prepareImage(source, width, height, crop, invert) {
   return canvas;
 }
 
+async function recognizeWords(canvas, whitelist) {
+  await worker.setParameters({ tessedit_char_whitelist: whitelist });
+  const { data } = await worker.recognize(canvas);
+  return (data.words || []).map((word) => ({ text: word.text, confidence: word.confidence, ...word.bbox }));
+}
+
 async function readLabel(source, width, height, crop) {
-  let name = '';
-  // Deuxième essai en négatif, pour le texte blanc des étiquettes promo.
+  // Première lecture : le texte complet, pour le nom et le prix.
+  const words = await recognizeWords(prepareImage(source, width, height, crop, false), '');
+  const name = extractName(words);
+  const readings = [parsePrices(words)];
+
+  // Lectures réservées aux chiffres, sur une image nettoyée (reflets, trame d'écran, promos).
   for (const invert of [false, true]) {
-    const canvas = prepareImage(source, width, height, crop, invert);
-    const { data } = await worker.recognize(canvas);
-    const words = (data.words || []).map((word) => ({ text: word.text, confidence: word.confidence, ...word.bbox }));
-    name = name || extractName(words);
-    const prices = parsePrices(words);
-    if (prices.length) return { prices, name };
+    const canvas = binarize(prepareImage(source, width, height, crop, false), invert);
+    readings.push(parsePrices(await recognizeWords(canvas, DIGITS_ONLY)));
+    if (isConfident(mergeReadings(readings)) && mergeReadings(readings)[0].reads > 1) break;
   }
-  return { prices: [], name };
+  if (!mergeReadings(readings).length) {
+    const inverted = prepareImage(source, width, height, crop, true);
+    readings.push(parsePrices(await recognizeWords(inverted, '')));
+  }
+  return { prices: mergeReadings(readings), name };
+}
+
+// Seuil local : chaque pixel est comparé à son voisinage, ce qui efface reflets et ombres.
+function binarize(canvas, invert) {
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const { width, height } = canvas;
+  const image = ctx.getImageData(0, 0, width, height);
+  const pixels = image.data;
+
+  // Image intégrale : calcule la moyenne de n'importe quel rectangle en temps constant.
+  const stride = width + 1;
+  const sums = new Float64Array(stride * (height + 1));
+  for (let y = 0; y < height; y++) {
+    let row = 0;
+    for (let x = 0; x < width; x++) {
+      row += pixels[(y * width + x) * 4];
+      sums[(y + 1) * stride + x + 1] = sums[y * stride + x + 1] + row;
+    }
+  }
+  const mean = (x0, y0, x1, y1) => (sums[y1 * stride + x1] - sums[y0 * stride + x1]
+    - sums[y1 * stride + x0] + sums[y0 * stride + x0]) / ((x1 - x0) * (y1 - y0));
+
+  const smooth = 2; // efface la trame de pixels d'un écran
+  const window = Math.max(15, Math.round(width / 10));
+  const out = new Uint8ClampedArray(width * height);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const local = mean(Math.max(0, x - smooth), Math.max(0, y - smooth),
+        Math.min(width, x + smooth + 1), Math.min(height, y + smooth + 1));
+      const area = mean(Math.max(0, x - window), Math.max(0, y - window),
+        Math.min(width, x + window + 1), Math.min(height, y + window + 1));
+      const dark = local < area * 0.9;
+      out[y * width + x] = dark === invert ? 255 : 0;
+    }
+  }
+  for (let i = 0; i < out.length; i++) {
+    pixels[i * 4] = pixels[i * 4 + 1] = pixels[i * 4 + 2] = out[i];
+  }
+  ctx.putImageData(image, 0, 0);
+  return canvas;
 }
 
 // Correspondance entre le cadre affiché et l'image réelle (object-fit: cover).
@@ -322,7 +374,7 @@ async function runScan(read) {
     ? result.prices
     : [{ cents: known.entry.cents, last: true }];
   openSheet({
-    title: prices.length ? 'Touche le bon prix' : 'Prix non lu. Réessaie ou saisis-le.',
+    title: prices.length ? 'Vérifie le prix' : 'Prix non lu. Réessaie ou saisis-le.',
     name: known ? known.entry.name : result.name,
     prices,
   });
@@ -346,12 +398,12 @@ function openSheet({ title, name = '', prices = [], manual = false, plannedKey =
   $('choices').replaceChildren(...prices.slice(0, 4).map((price, index) => {
     const choice = el('button', '', formatAmount(price.cents));
     choice.type = 'button';
-    if (price.unit || price.last) {
-      choice.append(el('small', '', price.last ? 'dernier prix connu' : 'prix au kilo/litre ?'));
-    }
+    const note = price.last ? 'dernier prix connu'
+      : price.unit ? 'prix au kilo/litre ?'
+        : price.unsure ? 'à vérifier' : '';
+    if (note) choice.append(el('small', '', note));
     choice.addEventListener('click', () => selectChoice(choice, price.cents));
-    // Un prix au kilo seul n'est jamais présélectionné : il fausserait le total.
-    if (index === 0 && !price.unit) queueMicrotask(() => selectChoice(choice, price.cents));
+    if (index === 0 && (price.last || isConfident(prices))) queueMicrotask(() => selectChoice(choice, price.cents));
     return choice;
   }));
 

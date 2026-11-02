@@ -78,6 +78,17 @@ h1 { margin: 0; font-size: 32px; }
   border-radius: 12px;
   box-shadow: 0 0 0 100vmax rgba(0, 0, 0, .4);
 }
+#camera-hint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 2%;
+  margin: 0;
+  color: #fff;
+  font-size: 13px;
+  text-align: center;
+  text-shadow: 0 1px 2px #000;
+}
 #camera-message {
   position: absolute;
   inset: 0;

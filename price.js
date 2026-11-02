@@ -38,9 +38,9 @@
 
   function parsePrices(words) {
     const found = [];
-    const add = (cents, height, unit, confidence) => {
+    const add = (cents, height, unit, confidence, unsure = false) => {
       if (cents === null) return;
-      found.push({ cents, unit, score: height * confidence * (unit ? 0.4 : 1) });
+      found.push({ cents, unit, unsure, score: height * confidence * (unit ? 0.4 : 1) });
     };
 
     words.forEach((word, i) => {
@@ -74,7 +74,21 @@
 
       // 249 : séparateur non lu. Probable seulement si rien de mieux n'est trouvé.
       const glued = text.match(/^(\d{1,2})(\d{2})$/);
-      if (glued) add(toCents(glued[1], glued[2]), height, followedByUnit(words, i, ''), 0.25);
+      if (glued) {
+        add(toCents(glued[1], glued[2]), height, followedByUnit(words, i, ''), 0.25, true);
+        return;
+      }
+
+      // 2,5 — une seule décimale.
+      const short = text.match(/^(\d{1,3})[,.](\d)$/);
+      if (short) {
+        add(toCents(short[1], short[2] + '0'), height, followedByUnit(words, i, ''), 0.5, true);
+        return;
+      }
+
+      // 12 — nombre seul : peut être un prix rond, ou des centimes écrits en petit non lus.
+      const bare = text.match(/^(\d{1,3})$/);
+      if (bare) add(toCents(bare[1], '00'), height, followedByUnit(words, i, ''), 0.3, true);
     });
 
     const best = new Map();
@@ -82,6 +96,32 @@
       if (!best.has(price.cents)) best.set(price.cents, price);
     }
     return [...best.values()];
+  }
+
+  // Combine plusieurs lectures de la même image : un prix relu plusieurs fois remonte.
+  function mergeReadings(readings) {
+    const merged = new Map();
+    for (const prices of readings) {
+      for (const price of prices) {
+        const known = merged.get(price.cents);
+        if (known) {
+          known.score += price.score;
+          known.unit = known.unit && price.unit;
+          known.unsure = known.unsure && price.unsure;
+          known.reads += 1;
+        } else {
+          merged.set(price.cents, { ...price, reads: 1 });
+        }
+      }
+    }
+    return [...merged.values()].sort((a, b) => b.score - a.score);
+  }
+
+  // Présélectionner un prix douteux fausserait le total sans que l'on s'en aperçoive.
+  function isConfident(prices) {
+    const [top, ...others] = prices;
+    if (!top || top.unit || top.unsure) return false;
+    return !others.some((other) => !other.unit && !other.unsure && other.score >= top.score / 2);
   }
 
   // Le nom est la ligne de vrais mots écrite le plus gros. Il reste modifiable dans l'appli.
@@ -115,4 +155,6 @@
 
   root.parsePrices = parsePrices;
   root.extractName = extractName;
+  root.mergeReadings = mergeReadings;
+  root.isConfident = isConfident;
 })(typeof self !== 'undefined' ? self : this);
